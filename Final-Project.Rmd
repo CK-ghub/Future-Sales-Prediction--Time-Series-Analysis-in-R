@@ -1,0 +1,597 @@
+---
+title: <center><b> Predict Future Sales </b></center>
+output: html_document
+---
+***
+## <b>Name: C Koushik</b>
+## <b>Reg.No: 18BCE1227</b>
+## <b>Dataset: Predict Future Sales- Kaggle</b>
+## <b>Source: https://www.kaggle.com/c/competitive-data-science-predict-future-sales</b>
+
+***
+
+## <b>Description of Dataset</b>
+
+<p>
+You are provided with daily historical sales data. The task is to forecast the total amount of products sold in every shop for the test set. Note that the list of shops and products slightly changes every month. Creating a robust model that can handle such situations is part of the challenge.
+
+<h3><b>File descriptions</b></h3>
+sales_train.csv - the training set. Daily historical data from January 2013 to October 2015.<br>
+test.csv - the test set. You need to forecast the sales for these shops and products for November 2015.<br>
+sample_submission.csv - a sample submission file in the correct format.<br>
+items.csv - supplemental information about the items/products.<br>
+item_categories.csv  - supplemental information about the items categories.<br>
+shops.csv- supplemental information about the shops.<br><br>
+<h3><b>Data fields</b></h3>
+ID - an Id that represents a (Shop, Item) tuple within the test set<br>
+shop_id - unique identifier of a shop<br>
+item_id - unique identifier of a product<br>
+item_category_id - unique identifier of item category<br>
+item_cnt_day - number of products sold. You are predicting a monthly amount of this measure<br>
+item_price - current price of an item<br>
+date - date in format dd/mm/yyyy<br>
+date_block_num - a consecutive month number, used for convenience. January 2013 is 0, February 2013 is 1,..., October 2015 is 33<br>
+item_name - name of item<br>
+shop_name - name of shop<br>
+item_category_name - name of item category
+
+***
+
+## <b>Work Progress(Proposed work)</b>
+<b>Review 1 : </b>Chose topic and dataset, explained its nature. Performed basic commands to describe datasets and kept it ready for review 2. <br><br>
+
+<b>Review 2 : </b>Explored the dataset, performed visualizations and deep analysis of each attribute in a top-down approach and displayed a time series chart to analyze the pattern of sales of products over the years in shops.<br><br>
+
+<b>Review 3: </b>Performed time series analysis, approximately predicted sales line for November 2015.
+
+***
+
+Importing packages
+```{r}
+library(dplyr)
+library(ggplot2)
+library(scales)
+library(lubridate)
+```
+***
+
+Reading dataset and basic commands
+```{r}
+df_train<-read.csv("C:\\Users\\luxcee99\\Downloads\\sales_train.csv")
+head(df_train)
+dim(df_train)
+typeof(df_train)
+class(df_train)
+```
+<b>For further analysis we require more details of items in the dataset. Therefore, I have joined columns from items.csv to the training dataset using left join operation.
+
+We need item_category_id from items.csv which is important</b>
+
+```{r}
+df_items<-read.csv("C:\\Users\\luxcee99\\Downloads\\items.csv")
+df_sales=df_train %>% left_join(df_items,by=c("item_id"))
+df_sales$item_name<-NULL
+head(df_sales)
+rm(df_train)
+rm(df_items)
+```
+
+```{r}
+glimpse(df_sales)
+```
+***
+
+### <b>Data preparation</b>
+```{r}
+#converting date column from character to date format
+df_sales$date=dmy(df_sales$date)
+```
+
+<b>To explore and analyze data in a top-down manner, we split the date into year, month, day and weekday. Performing feature engineering</b>
+
+```{r}
+df_sales$year<-year(df_sales$date)
+df_sales$month<-month(df_sales$date)
+df_sales$day<-day(df_sales$date)
+df_sales$weekday<-weekdays(df_sales$date)
+```
+
+<b> there are only 3 years (2013,2014 and 2015) in total and 7 days in a week, we convert the columns 'year' and 'weekday' into factors</b>
+
+```{r}
+df_sales$year<-as.factor(df_sales$year)
+df_sales$weekday<-as.factor(df_sales$weekday)
+```
+
+<b>As the task is to predict the total amount of products sold in every shop for November 2015, I'll have to find out how many items were sold per month in every shop</b>
+
+```{r}
+df_sales<-df_sales%>%group_by(year,month,shop_id,item_id)%>%mutate(item_cnt_month=sum(item_cnt_day))
+head(df_sales)
+```
+
+```{r}
+glimpse(df_sales)
+```
+
+```{r}
+summary(df_sales)
+```
+Checking for missing data in each column
+```{r}
+cbind(colSums(is.na(df_sales)))
+```
+ 
+```{r}
+is.null(df_sales)
+```
+<b>There are no missing/null/na values in the dataset</b>
+
+### <b>Exploratory Data Analysis</b>
+
+<b>Total number of unique shops</b>
+```{r}
+n_distinct(df_sales$shop_id)
+```
+<b>Total number of unique items in various shops</b>
+```{r}
+n_distinct(df_sales$item_id)
+```
+<b>Total number of unique item categories</b>
+```{r}
+n_distinct(df_sales$item_category_id)
+```
+
+<b>Shops and number of items in that shop</b>
+```{r}
+most_items=df_sales%>%group_by(shop_id)%>%summarize(total_items_per_shop=n_distinct(item_id))%>%arrange(desc(total_items_per_shop))%>%head(15)%>%ungroup()
+
+head(most_items)
+
+#Visualization
+ggplot(data=most_items,aes(x=reorder(as.factor(shop_id),total_items_per_shop),y=total_items_per_shop,fill=as.factor(shop_id)))+
+  geom_bar(stat="identity",color="Black")+
+  labs(title="Shops and number of items in that shop",x="Shop ID",y="Number of items",fill="Shop ID")+
+  geom_text(aes(label=total_items_per_shop),size=3,angle=90,hjust=1.2)
+```
+
+<b>Shop no. 25 has the most number of items (15367)</b>
+
+<b>Most sold item in shops </b>
+```{r}
+most_sold_item=df_sales%>%group_by(shop_id,item_id)%>%summarize(most_sold_item_cnt=sum(item_cnt_day))%>%filter(most_sold_item_cnt==max(most_sold_item_cnt))%>%arrange(desc(most_sold_item_cnt))%>%head(15)
+                                                  
+head(most_sold_item,10)                             
+
+#Visualization
+ggplot(data=most_sold_item,aes(x=reorder(as.factor(shop_id),most_sold_item_cnt),y=most_sold_item_cnt,fill=as.factor(item_id)))+
+  geom_bar(stat="identity",color="Black")+
+  coord_flip()+
+  labs(title="Shops and most sold item",x="Shop ID",y="Most sold item count",fill="Item ID")+
+  geom_text(aes(label=most_sold_item_cnt),size=3,hjust=1.2)
+```
+
+<b>Item no. 20949 is the most sold item across almost every shop and is most sold in shop 31 (19934 items)</b>
+
+<b>Shops and their total count of item categories</b>
+```{r}
+most_categories_shop=df_sales%>%group_by(shop_id)%>%summarize(total_categories_in_shop=n_distinct(item_category_id))%>%arrange(desc(total_categories_in_shop)) %>% head(15)%>%ungroup()
+
+head(most_categories_shop,10)
+
+#Visualization
+ggplot(data=most_categories_shop,aes(x=reorder(as.factor(shop_id),total_categories_in_shop),y=total_categories_in_shop,fill=as.factor(shop_id)))+
+  geom_bar(stat="identity",color="Black")+coord_flip()+
+  labs(title="Shops and total categories",x="Shop ID",y="Number of item categories",fill="Shop ID")+
+  geom_text(aes(label=total_categories_in_shop),size=3,hjust=1.2)
+```
+
+<b>Shop 25 has the most number of item categories (65 categories)</b>
+
+<b>To find out which item category is most popular in terms of sales </b>
+```{r}
+most_sold_category=df_sales%>%group_by(shop_id,item_category_id)%>%summarize(most_sold_category_cnt=sum(item_cnt_day))%>% filter(most_sold_category_cnt==max(most_sold_category_cnt))%>%arrange(desc(most_sold_category_cnt))%>% head(15)%>%ungroup()
+
+head(most_sold_category,10)
+
+#Visualization
+ggplot(data=most_sold_category,aes(x=reorder(as.factor(shop_id),most_sold_category_cnt),y=most_sold_category_cnt,fill=as.factor(item_category_id)))+
+  geom_bar(stat="identity",color="Black")+coord_flip()+
+  labs(title="Shops and count of most sold category ",x="Shop ID",y="Number of most sold item category",fill="Item Category ID")+
+  geom_text(aes(label=most_sold_category_cnt),size=3,hjust=1.2)
+```
+
+<b> Category 40 is the most sold item category in almost all the shops with highest sales in shop 31 (76069 products sold in category 40) </b>
+
+<b>Shops and their total number of sales</b>
+```{r}
+most_sales_shop=df_sales%>%group_by(shop_id)%>%summarize(most_sales_shop_cnt=n())%>%arrange(desc(most_sales_shop_cnt))%>%head(15)%>%ungroup()
+
+head(most_sales_shop,10)
+
+ggplot(data=most_sales_shop,aes(x=reorder(as.factor(shop_id),most_sales_shop_cnt),y=most_sales_shop_cnt,fill=as.factor(shop_id)))+geom_bar(stat="identity",color="Black")+
+  labs(x="Shop ID",y="Number of sales",title="Most popular shops in terms of sales",fill="Shop ID")+
+  geom_text(aes(label=most_sales_shop_cnt),size=3,angle=90,hjust=1.2)
+```
+
+<b>Shop 31 is the most popular shop in terms of sales having sold 235636 products</b>
+
+<b>Shops and their total revenue</b>
+```{r}
+total_revenue_shops=df_sales%>%group_by(shop_id)%>%summarize(revenue=sum(item_price*item_cnt_day))%>%arrange(desc(revenue))%>%head(15)%>%ungroup()
+
+head(total_revenue_shops,10)
+
+ggplot(data=total_revenue_shops,aes(x=reorder(as.factor(shop_id),revenue),y=revenue,fill=as.factor(shop_id))) +geom_bar(stat = "identity",color="Black") +
+  labs(x="Shop ID",y="Total Revenue", title="Most Popular Shops in terms of Total Revenue",fill="Shop ID")+geom_text(aes(label=paste ("$",round(revenue))),size=3.5,hjust=1.1,vjust=.5,angle=90)+
+  scale_y_continuous(labels=dollar)+
+  theme(axis.text.y=element_text(face="bold",color="palegreen4"))
+```
+
+<b>Shop 31 has got the highest revenue from sales with total grossing amount $235,217,019</b>
+
+<b>Total sales by item id</b>
+```{r}
+total_item_sales=df_sales%>%group_by(item_id)%>%summarize(total_sales=sum(item_cnt_day))%>%arrange(desc(total_sales))%>%head(15)%>%ungroup()
+
+head(total_item_sales,10)
+
+#Visualization
+ggplot(data=total_item_sales,aes(x=reorder(as.factor(item_id),total_sales),y=total_sales,fill=as.factor(item_id)))+
+  geom_bar(stat="identity",color="Black")+coord_flip()+
+  labs(title="Total sales by item id",x="Item ID",y="Number of sales",fill="Item ID")+
+  geom_text(aes(label=total_sales),size=3,hjust=0.4)
+```
+
+<b>Item 20949 is the most sold item with 187642 sales</b>
+
+<b>Total sales by item category id</b>
+```{r}
+total_category_sales=df_sales%>%group_by(item_category_id)%>%summarize(total_sales=sum(item_cnt_day))%>%arrange(desc(total_sales))%>%head(15)%>%ungroup()
+
+head(total_category_sales,10)
+
+#Visualization
+ggplot(data=total_category_sales,aes(x=reorder(as.factor(item_category_id),total_sales),y=total_sales,fill=as.factor(item_category_id)))+
+  geom_bar(stat="identity",color="Black")+coord_flip()+
+  labs(title="Total sales by item category id",x="Category ID",y="Number of sales",fill="Item category ID")+
+  geom_text(aes(label=total_sales),size=3,hjust=1.2)
+```
+
+<b>Items in category 40 have been most sold (634171 sales)</b>
+
+<b>Top 15 popular items based on Revenue</b>
+```{r}
+total_revenue_items=df_sales%>%group_by(item_id)%>%summarize(revenue=sum(item_price*item_cnt_day))%>%arrange(desc(revenue))%>%head(15)%>%ungroup()
+
+head(total_revenue_items,10)
+
+ggplot(data=total_revenue_items,aes(x=reorder(as.factor(item_id),revenue),y=revenue,fill=as.factor(item_id))) +geom_bar(stat = "identity",color="Black") +
+  labs(x="Item ID",y="Total Revenue", title="Most Popular items in terms of Total Revenue",fill="Item ID")+geom_text(aes(label=paste ("$",round(revenue))),size=3.5,hjust=0.7,vjust=.5,angle=50)+
+  scale_y_continuous(labels=dollar)+
+  theme(axis.text.y=element_text(face="bold",color="palegreen4"))
+```
+
+<b>Item 6675 is the most popular item in terms of overall revenue ($219,391,489)</b>
+
+<b>Top 15 shops selling item 6675 </b>
+```{r}
+total_revenue_shops=df_sales%>%filter(item_id==6675)%>%
+  group_by(shop_id)%>%summarize(revenue=sum(item_price*item_cnt_day))%>%
+  arrange(desc(revenue))%>%head(15)%>%ungroup()
+
+head(total_revenue_shops,10)
+
+ggplot(data=total_revenue_shops,aes(x=reorder(as.factor(shop_id),revenue),y=revenue,fill=as.factor(shop_id))) +geom_bar(stat = "identity",color="Black") +
+  labs(x="Shop ID",y="Total Revenue", title="Most Popular Shops in terms of Total Revenue from item 6675",fill="Shop ID")+geom_text(aes(label=paste ("$",round(revenue))),size=3.5,hjust=1.1,vjust=.5,angle=90)+
+  scale_y_continuous(labels=dollar)+
+  theme(axis.text.y=element_text(face="bold",color="palegreen4"))
+```
+
+<b>Shop 12 has got the highest turnover from selling item 6675 ($14,259,410)</b>
+
+<b>Top 15 popular item categories based on Revenue</b>
+```{r}
+total_revenue_itemcat=df_sales%>%group_by(item_category_id)%>%summarize(revenue=sum(item_price*item_cnt_day))%>%arrange(desc(revenue))%>%head(15)%>%ungroup()
+
+head(total_revenue_itemcat,10)
+
+ggplot(data=total_revenue_itemcat,aes(x=reorder(as.factor(item_category_id),revenue),y=revenue,fill=as.factor(item_category_id))) +geom_bar(stat = "identity",color="Black") +
+  labs(x="Item Category ID",y="Total Revenue", title="Most Popular item Categories in terms of Total Revenue",fill="Item Category ID")+geom_text(aes(label=paste ("$",round(revenue))),size=3.5,hjust=1.1,vjust=.5)+
+  scale_y_continuous(labels=dollar)+coord_flip()+
+  theme(axis.text.y=element_text(face="bold",color="palegreen4"))
+```
+
+<b>Item category 19 is the most popular in terms of total revenue ($412,050,281)</b>
+
+<b>Top 15 shops selling item category 19 </b>
+```{r}
+total_revenue_shops=df_sales%>%filter(item_category_id==19)%>%
+  group_by(shop_id)%>%summarize(revenue=sum(item_price*item_cnt_day))%>%
+  arrange(desc(revenue))%>%head(15)%>%ungroup()
+
+head(total_revenue_shops,10)
+
+ggplot(data=total_revenue_shops,aes(x=reorder(as.factor(shop_id),revenue),y=revenue,fill=as.factor(shop_id))) +geom_bar(stat = "identity",color="Black") +
+  labs(x="Shop ID",y="Total Revenue", title="Most Popular Shops in terms of Total Revenue from item category 19",fill="Shop ID")+geom_text(aes(label=paste ("$",round(revenue))),size=3.5,hjust=1.1,vjust=.5,angle=90)+
+  scale_y_continuous(labels=dollar)+
+  theme(axis.text.y=element_text(face="bold",color="palegreen4"))
+```
+
+<b>Shop 31 has got the highest turnover from selling item_category 19 ($26,485,251)</b>
+
+<b>Year-wise total sales turnover</b>
+```{r}
+total_revenue_year=df_sales%>%
+  group_by(year)%>%summarize(revenue=sum(item_price*item_cnt_day))%>%
+  ungroup()
+
+total_revenue_year
+
+ggplot(data=total_revenue_year,aes(x=year,y=revenue,fill=as.factor(year))) +geom_bar(stat = "identity",color="Black") +
+  labs(x="Year",y="Total Revenue", title="Sales revenue over the years",fill="Year")+geom_text(aes(label=paste ("$",round(revenue))),size=5,hjust=1.1,vjust=.5,angle=90)+
+  scale_y_continuous(labels=dollar)+
+  theme(axis.text.y=element_text(face="bold",color="palegreen4"))
+```
+
+```{r}
+total_sales_year=df_sales%>%group_by(year)%>%
+  summarize(total_sales=n())%>%ungroup()
+
+total_sales_year
+
+#Visualization
+ggplot(data=total_sales_year,aes(x=year,y=total_sales,fill=as.factor(year)))+
+  geom_bar(stat="identity",color="Black")+
+  labs(title="Total sales over the years",x="Year",y="Number of sales",fill="Year")+
+  geom_text(aes(label=total_sales),size=5,hjust=1.2,angle=90)
+```
+
+<b>Although there were more sales in the year 2013 (1267562 products sold), sales in 2014 incurred overall highest revenue ($1,346,778,479)</b>
+
+<b>Month-wise total sales and revenue over all the years combined</b>
+```{r}
+total_revenue_month=df_sales%>%
+  group_by(month)%>%summarize(revenue=sum(item_price*item_cnt_day))%>%
+  ungroup()
+
+total_revenue_month
+
+ggplot(data=total_revenue_month,aes(x=as.factor(month),y=revenue,fill=as.factor(month))) +geom_bar(stat = "identity",color="Black") +
+  labs(x="Month",y="Total Revenue", title="Total sales revenue over the Months in all the years",fill="Month")+geom_text(aes(label=paste ("$",round(revenue))),size=3.5,hjust=1.1,vjust=.5,angle=90)+
+  scale_y_continuous(labels=dollar)+
+  theme(axis.text.y=element_text(face="bold",color="palegreen4"))
+```
+
+<b>Total amount of sales over the months in all the years</b>
+```{r}
+total_sales_month=df_sales%>%group_by(month)%>%
+  summarize(total_sales=n())%>%ungroup()
+
+total_sales_month
+
+#Visualization
+ggplot(data=total_sales_month,aes(x=as.factor(month),y=total_sales,fill=as.factor(month)))+
+  geom_bar(stat="identity",color="Black")+
+  labs(title="Total sales over the months in all the years",x="Month",y="Number of sales",fill="Month")+
+  geom_text(aes(label=total_sales),size=5,hjust=1.2,angle=90)
+```
+
+<b>Although most products were sold in the month of January (303561), most revenue was grossed in the month of December. Overall maximum profits can be incurred in the months of December-January. The reason might be due to Christmas and New Year</b>
+
+<b>OVerall Day-wise sales and revenue over all the years</b>
+```{r}
+total_revenue_weekdays=df_sales%>%
+  group_by(weekday)%>%summarize(revenue=sum(item_price*item_cnt_day))%>%
+  ungroup()
+
+total_revenue_weekdays
+
+ggplot(data=total_revenue_weekdays,aes(x=as.factor(weekday),y=revenue,fill=as.factor(weekday))) +geom_bar(stat = "identity",color="Black") +
+  labs(x="Day of the week",y="Total Revenue", title="Total sales revenue over days of the week in all the years",fill="Day of the week")+geom_text(aes(label=paste ("$",round(revenue))),size=3.5,hjust=1.1,vjust=.5,angle=90)+
+  scale_y_continuous(labels=dollar)+
+  theme(axis.text.y=element_text(face="bold",color="palegreen4"))
+```
+
+<b>Total sales over the days of the week in all the years combined</b>
+```{r}
+total_sales_weekdays=df_sales%>%group_by(weekday)%>%
+  summarize(total_sales=n())%>%ungroup()
+
+total_sales_weekdays
+
+#Visualization
+ggplot(data=total_sales_weekdays,aes(x=as.factor(weekday),y=total_sales,fill=as.factor(weekday)))+
+  geom_bar(stat="identity",color="Black")+
+  labs(title="Total sales over the weekdays in all the years",x="Day of the week",y="Number of sales",fill="Day of the week")+
+  geom_text(aes(label=total_sales),size=5,hjust=1.2,angle=90)
+```
+
+<b>Saturday has observed most sales (590359 products) as well as most revenue ($643,667,826). Overall, we can see most products being sold in the weekends while the sales curve is flattened for weekdays</b>
+
+### <b>Sales pattern for the year 2014</b>
+<b>Month-day wise sales in the year 2014</b>
+```{r}
+month_day_sales = df_sales %>% filter(year==2014) %>% 
+  group_by(month,day) %>% summarize(total_sales=sum(item_cnt_day)) %>% ungroup()
+
+ggplot(data=month_day_sales, aes(x=day, y=total_sales,color=as.factor(month)))+
+  geom_line()+
+  geom_point()+
+  facet_wrap(~month)
+```
+
+<b>The above represents the trend of overall sales month-day wise in the year 2014. We can notice clear spike in sales during early January and December. Thus validating the statements made earlier</b>
+
+<b>Top 15 selling items in the year 2014</b>
+```{r}
+most_selling_items = df_sales%>%filter(year==2014)%>%
+  group_by(item_id)%>%summarize(total_sales=sum(item_cnt_day))%>%
+  arrange(desc(total_sales))%>%head(15)%>%ungroup()
+
+head(most_selling_items,10)
+
+#visualization
+ggplot(data=most_selling_items,aes(x=reorder(as.factor(item_id),total_sales),y=total_sales,fill=as.factor(item_id)))+
+  geom_bar(stat="identity",color="Black")+coord_flip()+
+  labs(title="Total sales by item id in the year 2014",x="Item ID",y="Number of sales",fill="Item ID")+
+  geom_text(aes(label=total_sales),size=3,hjust=0.4)
+
+```
+
+<b>Item 20949 is the most sold item in the year 2014 (85288 sales)</b>
+
+<b>Top 15 grossing items in the year 2014</b>
+```{r}
+total_revenue_itemcat=df_sales%>%filter(year==2014)%>%
+  group_by(item_category_id)%>%summarize(revenue=sum(item_price*item_cnt_day))%>%
+  arrange(desc(revenue))%>%head(15)%>%ungroup()
+
+head(total_revenue_itemcat,10)
+
+#visualizations
+ggplot(data=total_revenue_itemcat,aes(x=reorder(as.factor(item_category_id),revenue),y=revenue,fill=as.factor(item_category_id)))+
+  geom_bar(stat = "identity",color="Black")+
+  labs(x="Item Category ID",y="Total Revenue", title="Most Popular item Categories in terms of Total Revenue in the year 2014",fill="Item Category ID")+geom_text(aes(label=paste ("$",round(revenue))),size=3,hjust=1.1,vjust=.5)+
+  scale_y_continuous(labels=dollar)+coord_flip()+
+  theme(axis.text.y=element_text(face="bold",color="palegreen4"))
+```
+
+<b>Category 20 is most grossing in the year 2014 with total revenue $181,647,314</b>
+
+<b>Most popular shops in the year 2014 based on item sales</b>
+```{r}
+most_sales_shop=df_sales%>%filter(year==2014)%>%
+  group_by(shop_id)%>%summarize(most_sales_shop_cnt=n())%>%arrange(desc(most_sales_shop_cnt))%>%head(15)%>%ungroup()
+
+head(most_sales_shop,10)
+
+ggplot(data=most_sales_shop,aes(x=reorder(as.factor(shop_id),most_sales_shop_cnt),y=most_sales_shop_cnt,fill=as.factor(shop_id)))+geom_bar(stat="identity",color="Black")+
+  labs(x="Shop ID",y="Number of sales",title="Most popular shops in terms of sales in the year 2014",fill="Shop ID")+
+  geom_text(aes(label=most_sales_shop_cnt),size=3,angle=90,hjust=1.2)
+```
+
+<b>Shop 31 is most popular in the year 2014 in terms of total sales (83441 sales)</b>
+
+<b>Most popular shops in terms of total revenue in the year 2014</b>
+```{r}
+total_revenue_shops=df_sales%>%filter(year==2014)%>%
+  group_by(shop_id)%>%summarize(revenue=sum(item_price*item_cnt_day))%>%
+  arrange(desc(revenue))%>%head(15)%>%ungroup()
+
+head(total_revenue_shops,10)
+
+ggplot(data=total_revenue_shops,aes(x=reorder(as.factor(shop_id),revenue),y=revenue,fill=as.factor(shop_id)))+
+  geom_bar(stat = "identity",color="Black")+
+  labs(x="Shop ID",y="Total Revenue", title="Most Popular Shops in terms of Total Revenue in the year 2014",fill="Shop ID")+geom_text(aes(label=paste ("$",round(revenue))),size=3.5,hjust=1.1,vjust=.5,angle=90)+
+  scale_y_continuous(labels=dollar)+
+  theme(axis.text.y=element_text(face="bold",color="palegreen4"))
+```
+
+<b>Shop 31 is also most popular in the year 2014 in terms of total revenue ($89,003,723)</b>
+
+<b>Sales behavior over a period of time</b>
+```{r}
+df_sales %>% ggplot(aes(date))+
+  geom_freqpoly(color="blue",binwidth=10,size=1.2)
+
+```
+
+<b>We can notice the highest peak in sales in the year 2014 and another peak in 2015</b>
+ 
+<b>Which month had the highest sales in the year 2014?</b>
+```{r}
+max_sales_2014=df_sales %>% filter(year==2014) %>% group_by(month) %>%
+  summarize(max_sales=sum(item_cnt_day)) %>% arrange(desc(max_sales)) %>%
+                                                        ungroup()
+head(max_sales_2014)
+
+ggplot(data=max_sales_2014,aes(x=as.factor(month),y=max_sales,fill=as.factor(month)))+
+  geom_bar(stat="identity",color="Black")+
+  labs(title="Total sales over the months in the year 2015",x="Month",y="Number of sales",fill="Month")+
+  geom_text(aes(label=max_sales),size=5,hjust=1.2,angle=90)
+```
+
+<b>WMax sales occured in the month of December in the year 2014 (168755 products sold)</b>
+
+<b>Which month had the highest sales in the year 2015?</b>
+```{r}
+max_sales_2015=df_sales %>% filter(year==2015) %>% group_by(month) %>%
+  summarize(max_sales=sum(item_cnt_day)) %>% arrange(desc(max_sales)) %>%
+                                                        ungroup()
+head(max_sales_2015)
+
+ggplot(data=max_sales_2015,aes(x=as.factor(month),y=max_sales,fill=as.factor(month)))+
+  geom_bar(stat="identity",color="Black")+
+  labs(title="Total sales over the months in the year 2015",x="Month",y="Number of sales",fill="Month")+
+  geom_text(aes(label=max_sales),size=5,hjust=1.2,angle=90)
+
+```
+
+<b>Max sales occured in the month of January in the year 2015 (110971 products sold)</b>
+
+<b>It's also interesting to note the pattern of increased sales in the months of December and January while taking two consecutive years. This might be due to Winter breaks for Christmas and New Year</b>
+
+As discussed previously, I could not perform statistical analysis due to the lack of availability of enough factors and continuous variables. Therefore, we will directly proceed to time series forecasting modeling in Review 3, below.
+
+*** 
+
+<b>For time series analysis, we only require date and total amount of products sold per day therefore, we take subset of dataset and convert them to a time series dataset</b>
+
+```{r}
+#Sorting data according to the date
+arrange(df_sales,df_sales$date)
+
+```
+
+<b> For forecasting total sales in a day, we group the data by date and find aggregate of products sold that day</b>
+```{r}
+df_agg=df_sales%>%group_by(date)%>%summarise(sales_count=sum(item_cnt_day))
+df_agg
+```
+
+<b>Converting above dataframe to a time series </b>
+```{r}
+library(xts)
+library(forecast)
+agg_ts=xts(df_agg$sales_count, order.by = df_agg$date, frequency = 365)
+head(agg_ts)
+```
+
+```{r}
+plot(agg_ts)
+```
+
+<b>The above is the time-series plot oft total amount of products sold per day. The data ranges from 1st Jan 2013 to 31st October 2015. Since there are too many records, we will be focusing on most recent sales trend</b>
+
+```{r}
+#Subset of data in the month of october in the year 2015
+df_sub=df_sales%>%group_by(date)%>%filter(date_block_num==33)%>%summarise(sales_count=sum(item_cnt_day))
+head(df_sub)
+```
+
+```{r}
+ggplot(df_sub,aes(x=as.factor(date),y=sales_count,group=1))+
+  geom_line(colour="#000099")+geom_point(size=1.5,colour="#cc0000")+
+  theme(axis.text.x=element_text(angle=90))
+```
+
+<b>Sales line in the month of October 2015</b>
+
+
+### <b>Autoregressive Integrated Moving Average (ARIMA) Model Forecasting</b>
+```{r}
+agg_ts=as.ts(agg_ts)
+class(agg_ts)
+arima_model <- auto.arima(agg_ts,seasonal.test = "seas")
+arima_model
+arima_pred1 = forecast(arima_model , h = 30)
+arima_pred1 <- as.data.frame(arima_pred1$mean)
+plot(forecast(arima_model)) #arima plot
+
+```
+
+<b>Conclusion from the above plot:-<br><br>There is no definite trend in the sales of products. Due to high variability, the model cannot very accurately forecast future sales and the confidence interval is also high. Although there is data available only until October 2015, we can observe a small blue line which is the predicted sales line for the next 30 days which is the month of November in the year 2015. Approximately 2500-3000 products are sold per day in November 2015.
+
+***
+
